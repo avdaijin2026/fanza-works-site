@@ -31,7 +31,7 @@ export default function GenresPage() {
               {group.items.map((item) => (
                 <Link
                   key={item.id}
-                  href={`/?genre=${item.id}`}
+                  href={`/genres/${item.id}`}
                   className="genre-grid-link"
                 >
                   {item.name}

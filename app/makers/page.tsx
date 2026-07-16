@@ -106,7 +106,7 @@ export default async function MakersPage({
             {makers.map((item) => (
               <Link
                 key={item.id}
-                href={`/?maker=${item.id}`}
+                href={`/makers/${item.id}`}
                 style={{
                   display: "block",
                   textDecoration: "none",

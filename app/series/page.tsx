@@ -106,7 +106,7 @@ export default async function SeriesPage({
             {series.map((item) => (
               <Link
                 key={item.id}
-                href={`/?series=${item.id}`}
+                href={`/series/${item.id}`}
                 style={{
                   display: "block",
                   textDecoration: "none",

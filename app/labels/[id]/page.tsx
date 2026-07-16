@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
+import { cache } from "react";
+import Breadcrumb, { type BreadcrumbItem } from "@/components/Breadcrumb";
+import BreadcrumbJsonLd from "@/components/StructuredData/BreadcrumbJsonLd";
 import { getWorks, type WorkSort } from "@/lib/dmm";
 
 const SITE_URL = "https://avdizin.com";
-
-export const metadata: Metadata = {
-  alternates: {
-    canonical: `${SITE_URL}/`,
-  },
-};
 
 const sortTabs: { label: string; value: WorkSort }[] = [
   { label: "人気順", value: "rank" },
@@ -18,6 +16,46 @@ const sortTabs: { label: string; value: WorkSort }[] = [
   { label: "価格安い順", value: "-price" },
 ];
 
+type PageProps = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{
+    page?: string;
+    sort?: string;
+  }>;
+};
+
+type WorkItem = {
+  content_id: string;
+  title: string;
+  date?: string;
+  imageURL?: {
+    large?: string;
+    list?: string;
+  };
+  iteminfo?: {
+    label?: {
+      id?: string | number;
+      label_id?: string | number;
+      name?: string;
+    }[];
+  };
+};
+
+function requireValidLabelId(value: string) {
+  if (!/^\d+$/.test(value)) {
+    console.warn(`Rejected invalid labelId: ${value}`);
+    notFound();
+  }
+
+  return value;
+}
+
+function normalizePage(page?: string) {
+  const value = Number(page || "1");
+
+  return Number.isInteger(value) && value > 0 ? value : 1;
+}
+
 function normalizeWorkSort(sort?: string): WorkSort {
   return sortTabs.some((tab) => tab.value === sort)
     ? (sort as WorkSort)
@@ -25,13 +63,8 @@ function normalizeWorkSort(sort?: string): WorkSort {
 }
 
 function getPagination(currentPage: number, totalPages: number) {
-  const pages: (number | string)[] = [];
-
   if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) {
-      pages.push(i);
-    }
-    return pages;
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
   }
 
   if (currentPage <= 4) {
@@ -61,92 +94,102 @@ function getPagination(currentPage: number, totalPages: number) {
   ];
 }
 
-export default async function HomePage({
+function findLabelName(items: WorkItem[], labelId: string) {
+  for (const item of items) {
+    const labels = Array.isArray(item.iteminfo?.label)
+      ? item.iteminfo.label
+      : [];
+    const label = labels.find(
+      (candidate) =>
+        String(candidate.id ?? candidate.label_id ?? "") === labelId
+    );
+
+    if (label?.name) {
+      return label.name;
+    }
+  }
+
+  return "";
+}
+
+const getLabelPageData = cache(
+  async (labelId: string, page: number, sort: WorkSort) => {
+    const result = await getWorks(
+      page,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      labelId,
+      undefined,
+      sort
+    );
+    const items = result.items as WorkItem[];
+    const labelName = findLabelName(items, labelId);
+
+    return {
+      ...result,
+      labelName,
+      title: labelName
+        ? `${labelName}作品一覧 - AV大臣`
+        : `レーベルID ${labelId} の作品一覧 - AV大臣`,
+    };
+  }
+);
+
+export async function generateMetadata({
+  params,
   searchParams,
-}: {
-  searchParams: Promise<{
-    page?: string;
-    genre?: string;
-    genre_name?: string;
-    series?: string;
-    series_name?: string;
-    maker?: string;
-    maker_name?: string;
-    actress?: string;
-    actress_name?: string;
-    label?: string;
-    label_name?: string;
-    keyword?: string;
-    sort?: string;
-  }>;
-}) {
-  const params = await searchParams;
-  const currentPage = Number(params.page || "1");
-  const currentSort = normalizeWorkSort(params.sort);
+}: PageProps): Promise<Metadata> {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const labelId = requireValidLabelId(id);
+  const currentPage = normalizePage(query.page);
+  const currentSort = normalizeWorkSort(query.sort);
+  const { title } = await getLabelPageData(labelId, currentPage, currentSort);
 
-  const genreId = params.genre;
-  const genreName = params.genre_name;
-  const seriesId = params.series;
-  const seriesName = params.series_name;
-  const makerId = params.maker;
-  const makerName = params.maker_name;
-  const actressId = params.actress;
-  const actressName = params.actress_name;
-  const labelId = params.label;
-  const labelName = params.label_name;
-  const keyword = params.keyword?.trim();
+  return {
+    title,
+    alternates: {
+      canonical: `${SITE_URL}/labels/${encodeURIComponent(labelId)}`,
+    },
+  };
+}
 
-  const result = await getWorks(
-    currentPage,
-    genreId,
-    seriesId,
-    makerId,
-    actressId,
+export default async function LabelWorksPage({
+  params,
+  searchParams,
+}: PageProps) {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const labelId = requireValidLabelId(id);
+  const currentPage = normalizePage(query.page);
+  const currentSort = normalizeWorkSort(query.sort);
+  const { items, totalPages, title, labelName } = await getLabelPageData(
     labelId,
-    keyword,
+    currentPage,
     currentSort
   );
-
-  const items = result.items;
-  const totalPages = result.totalPages;
   const paginationItems = getPagination(currentPage, totalPages);
-
-  const title = keyword
-    ? `「${keyword}」の検索結果`
-    : labelId
-      ? `${labelName || "レーベル"}の作品一覧`
-      : actressId
-        ? `${actressName || "女優"}の作品一覧`
-        : makerId
-          ? `${makerName || "メーカー"}の作品一覧`
-          : seriesId
-            ? `${seriesName || "シリーズ"}の作品一覧`
-            : genreId
-              ? `${genreName || "ジャンル"}の作品一覧`
-              : "作品一覧";
+  const breadcrumbItems: BreadcrumbItem[] = [
+    { name: "ホーム", href: "/" },
+    { name: "レーベル", href: "/labels" },
+    {
+      name: labelName || `レーベルID ${labelId}`,
+      href: `/labels/${encodeURIComponent(labelId)}`,
+    },
+  ];
 
   const makePageHref = (page: number, sort: WorkSort = currentSort) => {
-    const query = new URLSearchParams();
-    query.set("page", String(page));
+    const queryParams = new URLSearchParams({
+      page: String(page),
+      sort,
+    });
 
-    if (genreId) query.set("genre", genreId);
-    if (genreName) query.set("genre_name", genreName);
-    if (seriesId) query.set("series", seriesId);
-    if (seriesName) query.set("series_name", seriesName);
-    if (makerId) query.set("maker", makerId);
-    if (makerName) query.set("maker_name", makerName);
-    if (actressId) query.set("actress", actressId);
-    if (actressName) query.set("actress_name", actressName);
-    if (labelId) query.set("label", labelId);
-    if (labelName) query.set("label_name", labelName);
-    if (keyword) query.set("keyword", keyword);
-    query.set("sort", sort);
-
-    return `/?${query.toString()}`;
+    return `/labels/${encodeURIComponent(labelId)}?${queryParams.toString()}`;
   };
 
   return (
     <main>
+      <BreadcrumbJsonLd items={breadcrumbItems} siteUrl={SITE_URL} />
       <div
         style={{
           maxWidth: "1800px",
@@ -154,16 +197,19 @@ export default async function HomePage({
           width: "100%",
         }}
       >
-        <div
+        <Breadcrumb items={breadcrumbItems} />
+
+        <h1
           style={{
             padding: "12px 12px 0",
+            margin: 0,
             color: "#fff",
             fontWeight: "bold",
             fontSize: "18px",
           }}
         >
           {title}
-        </div>
+        </h1>
 
         <div
           style={{
@@ -200,18 +246,6 @@ export default async function HomePage({
           })}
         </div>
 
-        {keyword && (
-          <div
-            style={{
-              padding: "6px 12px 0",
-              color: "#aaa",
-              fontSize: "13px",
-            }}
-          >
-            検索キーワード: {keyword}
-          </div>
-        )}
-
         <div
           style={{
             display: "grid",
@@ -220,7 +254,7 @@ export default async function HomePage({
             padding: "14px 12px 30px",
           }}
         >
-          {items.map((item: any) => (
+          {(items as WorkItem[]).map((item) => (
             <Link
               key={item.content_id}
               href={`/works/${item.content_id}`}

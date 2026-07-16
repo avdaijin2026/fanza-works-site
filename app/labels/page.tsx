@@ -141,7 +141,7 @@ export default function LabelsPage() {
                   return (
                     <Link
                       key={item.name}
-                      href={`/?label=${item.id}&label_name=${encodeURIComponent(item.name)}`}
+                      href={`/labels/${item.id}`}
                       style={cardStyle}
                     >
                       {content}

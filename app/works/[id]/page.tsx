@@ -1,19 +1,27 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import Breadcrumb, { type BreadcrumbItem } from "@/components/Breadcrumb";
+import BreadcrumbJsonLd from "@/components/StructuredData/BreadcrumbJsonLd";
 import SampleGallery from "./SampleGallery";
 import VideoPlayer from "./VideoPlayer";
 import { genreIdMap } from "@/lib/genre-id-map";
+import { getDetail, getWorksByActress } from "@/lib/dmm";
 
-async function getDetail(id: string) {
-  const apiId = process.env.DMM_API_ID!;
-  const affiliateId = process.env.DMM_AFFILIATE_ID!;
+const SITE_URL = "https://avdizin.com";
 
-  const url = `https://api.dmm.com/affiliate/v3/ItemList?api_id=${apiId}&affiliate_id=${affiliateId}&cid=${id}&site=FANZA&service=digital&floor=videoa&output=json`;
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
 
-  const res = await fetch(url, { cache: "no-store" });
-  const json = await res.json();
-
-  return json?.result?.items?.[0];
+  return {
+    alternates: {
+      canonical: `${SITE_URL}/works/${encodeURIComponent(id)}`,
+    },
+  };
 }
 
 export default async function Page({
@@ -38,12 +46,48 @@ export default async function Page({
     item.imageURL?.large ||
     item.sampleImageURL?.sample_l?.image?.[0] ||
     "";
+  const fanzaUrl = item.affiliateURL || item.URL;
 
   const actressList = item.iteminfo?.actress || [];
   const seriesList = item.iteminfo?.series || [];
   const makerList = item.iteminfo?.maker || [];
   const labelList = item.iteminfo?.label || [];
   const genreList = item.iteminfo?.genre || [];
+  const actressId = actressList
+    .map((actress: any) => actress.id || actress.actress_id)
+    .find(Boolean);
+  const sameActressWorks = actressId
+    ? await getWorksByActress(String(actressId), id, 6)
+    : [];
+  const breadcrumbGenre = genreList.find((genre: any) => {
+    const genreId = genre.id || genre.genre_id;
+    return genreId && genre.name;
+  });
+  const breadcrumbGenreId = breadcrumbGenre
+    ? String(breadcrumbGenre.id || breadcrumbGenre.genre_id)
+    : "";
+  const breadcrumbItems: BreadcrumbItem[] =
+    breadcrumbGenreId && breadcrumbGenre?.name
+      ? [
+          { name: "ホーム", href: "/" },
+          { name: "ジャンル", href: "/genres" },
+          {
+            name: String(breadcrumbGenre.name),
+            href: `/genres/${encodeURIComponent(breadcrumbGenreId)}`,
+          },
+          {
+            name: item.title,
+            href: `/works/${encodeURIComponent(id)}`,
+          },
+        ]
+      : [
+          { name: "ホーム", href: "/" },
+          { name: "作品" },
+          {
+            name: item.title,
+            href: `/works/${encodeURIComponent(id)}`,
+          },
+        ];
 
   if (labelList.length > 0) {
   console.log("detail labelList:", JSON.stringify(labelList, null, 2));
@@ -85,6 +129,7 @@ export default async function Page({
 
   return (
     <main style={{ padding: "20px" }}>
+      <BreadcrumbJsonLd items={breadcrumbItems} siteUrl={SITE_URL} />
 {/* ===== タイトルエリア ===== */}
 <div
   style={{
@@ -94,6 +139,7 @@ export default async function Page({
     marginRight: "auto",
   }}
 >
+  <Breadcrumb items={breadcrumbItems} />
   <h1
     style={{
       fontSize: "20px",
@@ -148,7 +194,7 @@ export default async function Page({
         }}
       >
         <a
-          href={item.URL}
+          href={fanzaUrl}
           target="_blank"
           rel="noopener noreferrer"
           style={{
@@ -210,7 +256,7 @@ export default async function Page({
                 return (
                   <Link
                     key={actressId}
-                    href={`/?actress=${actressId}&actress_name=${encodeURIComponent(a.name)}`}
+                    href={`/actresses/${encodeURIComponent(String(actressId))}`}
                     style={{
                       padding: "8px 12px",
                       border: "1px solid #ccc",
@@ -263,7 +309,7 @@ export default async function Page({
                 return (
                   <Link
                     key={seriesId}
-                    href={`/?series=${seriesId}&series_name=${encodeURIComponent(s.name)}`}
+                    href={`/series/${encodeURIComponent(seriesId)}`}
                     style={{
                       padding: "8px 12px",
                       border: "1px solid #ccc",
@@ -316,7 +362,7 @@ export default async function Page({
                 return (
                   <Link
                     key={makerId}
-                    href={`/?maker=${makerId}&maker_name=${encodeURIComponent(m.name)}`}
+                    href={`/makers/${encodeURIComponent(makerId)}`}
                     style={{
                       padding: "8px 12px",
                       border: "1px solid #ccc",
@@ -370,7 +416,7 @@ export default async function Page({
         return (
           <Link
             key={labelId}
-            href={`/?label=${labelId}&label_name=${encodeURIComponent(l.name)}`}
+            href={`/labels/${encodeURIComponent(labelId)}`}
             style={{
               padding: "8px 12px",
               border: "1px solid #ccc",
@@ -406,7 +452,7 @@ export default async function Page({
                 return (
                   <Link
                     key={genreId || g.name}
-                    href={`/?genre=${genreId}&genre_name=${encodeURIComponent(g.name)}`}
+                    href={`/genres/${encodeURIComponent(genreId)}`}
                     style={{
                       padding: "8px 12px",
                       border: "1px solid #ccc",
@@ -429,6 +475,83 @@ export default async function Page({
       <div style={{ maxWidth: "900px", margin: "0 auto" }}>
         <SampleGallery images={item.sampleImageURL?.sample_l?.image || []} />
       </div>
+
+      {sameActressWorks.length > 0 && (
+        <section
+          style={{
+            maxWidth: "1100px",
+            margin: "40px auto 0",
+            padding: "0 12px 30px",
+          }}
+        >
+          <h2
+            style={{
+              margin: "0 0 14px",
+              color: "#fff",
+              fontSize: "18px",
+              fontWeight: "bold",
+            }}
+          >
+            同じ女優の作品
+          </h2>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
+              gap: "24px 16px",
+            }}
+          >
+            {sameActressWorks.map((work: any) => (
+              <Link
+                key={work.content_id}
+                href={`/works/${work.content_id}`}
+                style={{
+                  textDecoration: "none",
+                  color: "inherit",
+                  display: "block",
+                }}
+              >
+                <div>
+                  <img
+                    src={work.imageURL?.large || work.imageURL?.list}
+                    alt={work.title}
+                    style={{
+                      width: "100%",
+                      aspectRatio: "4 / 3",
+                      objectFit: "cover",
+                      display: "block",
+                      background: "#111",
+                    }}
+                  />
+
+                  <p
+                    style={{
+                      margin: "8px 0 4px",
+                      fontSize: "14px",
+                      lineHeight: "1.45",
+                      color: "#fff",
+                    }}
+                  >
+                    {work.title}
+                  </p>
+
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: "12px",
+                      color: "#aaa",
+                    }}
+                  >
+                    登録日 {work.date}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
     </main>
   );
 }
