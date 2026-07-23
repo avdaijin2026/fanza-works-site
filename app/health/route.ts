@@ -4,6 +4,10 @@ import {
   POPULAR_ACTRESS_RANKING_CACHE_PATH,
   TOP_WORKS_CACHE_PATH,
 } from "@/lib/cache-paths";
+import {
+  formatCacheSize,
+  getCacheHealth,
+} from "@/lib/cache-management";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +41,11 @@ async function hasDetailCache() {
 }
 
 export async function GET() {
-  const [top, ranking, detail] = await Promise.all([
+  const [top, ranking, detail, cache] = await Promise.all([
     fileExists(TOP_WORKS_CACHE_PATH),
     fileExists(POPULAR_ACTRESS_RANKING_CACHE_PATH),
     hasDetailCache(),
+    getCacheHealth(),
   ]);
   const checks = { top, ranking, detail };
   const isHealthy = Object.values(checks).every(Boolean);
@@ -48,7 +53,14 @@ export async function GET() {
   return Response.json(
     {
       status: isHealthy ? "ok" : "error",
+      uptime: process.uptime(),
       checks,
+      cacheSize: formatCacheSize(cache.bytes),
+      cacheBytes: cache.bytes,
+      cacheFiles: cache.files,
+      cacheStatus: cache.status,
+      lastCleanup: cache.lastCleanup,
+      ...(cache.scanError ? { cacheError: cache.scanError } : {}),
       checkedAt: new Date().toISOString(),
     },
     {

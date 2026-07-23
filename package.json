@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "cleanup-cache": "node scripts/cleanup-cache.mjs",
+    "test:cache-cleanup": "node --test tests/cache-cleanup.test.mjs",
     "generate:actress-descriptions": "node --env-file=.env.local scripts/generate-pending-actress-descriptions.mjs"
   },
   "dependencies": {

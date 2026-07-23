@@ -1,0 +1,3 @@
+# Install with: crontab ops/cron/fanza-cache-cleanup
+# Daily at 03:07 JST. The script has its own exclusive lock.
+7 3 * * * cd /root/fanza-works-site && /usr/bin/npm run cleanup-cache >> /root/fanza-works-site-cache/.cache-cleanup-cron.log 2>&1
