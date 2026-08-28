@@ -1,3 +1,8 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+
 type AdvertisementPosition = "top" | "bottom";
 
 type AdvertisementProps = {
@@ -9,25 +14,34 @@ const advertisementIds: Record<AdvertisementPosition, string> = {
   bottom: "1276",
 };
 
-function createAdvertisementDocument(id: string) {
-  return `<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=300, initial-scale=1">
-    <style>html,body{width:300px;height:250px;margin:0;padding:0;overflow:hidden;background:transparent}</style>
-  </head>
-  <body>
-    <script language="JavaScript" type="text/javascript" charset="UTF-8">
-      noCacheParam=Math.random()*10000000000;
-      document.write('<scr'+'ipt type="text/javascript" charset="UTF-8" src="//adone.yicha.jp/adv_tags/?id=${id}&ord=' + noCacheParam + '"></scr'+'ipt>');
-    </script>
-  </body>
-</html>`;
-}
-
 export default function Advertisement({ position }: AdvertisementProps) {
+  const [isMobile, setIsMobile] = useState(false);
+  const [visiblePathname, setVisiblePathname] = useState<string | null>(null);
+  const pathname = usePathname();
   const id = advertisementIds[position];
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const updateVisibility = () => {
+      const isNotFound = document.querySelector(
+        '[data-page-not-found="true"]'
+      );
+
+      setIsMobile(mediaQuery.matches && !isNotFound);
+      setVisiblePathname(pathname);
+    };
+
+    updateVisibility();
+    mediaQuery.addEventListener("change", updateVisibility);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateVisibility);
+    };
+  }, [pathname]);
+
+  if (!isMobile || visiblePathname !== pathname) {
+    return null;
+  }
 
   return (
     <aside
@@ -39,7 +53,7 @@ export default function Advertisement({ position }: AdvertisementProps) {
       <iframe
         className="advertisement-frame"
         title={`${position === "top" ? "上部" : "下部"}広告`}
-        srcDoc={createAdvertisementDocument(id)}
+        src={`/ad-frame/${position}`}
         width="300"
         height="250"
         scrolling="no"
