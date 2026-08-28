@@ -15,6 +15,7 @@ export default async function GenresDebugPage() {
 
   return (
     <main style={{ padding: "24px", background: "#111", color: "#fff", minHeight: "100vh" }}>
+      <style>{`.advertisement { display: none; }`}</style>
       <h1 style={{ fontSize: "28px", marginBottom: "24px" }}>ジャンルID確認ページ</h1>
 
       {genreLists.map((group) => (

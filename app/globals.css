@@ -105,6 +105,45 @@ main {
   width: 100%;
 }
 
+/* ===== 広告 ===== */
+.advertisement {
+  width: 100%;
+  margin: 20px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+}
+
+.advertisement-label {
+  margin-bottom: 4px;
+  color: #9ca3af;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.advertisement-frame {
+  display: block;
+  width: 300px;
+  max-width: 100%;
+  height: 250px;
+  border: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.not-found-page {
+  max-width: 720px;
+  min-height: 50vh;
+  margin: 0 auto;
+  padding: 64px 20px;
+  text-align: center;
+}
+
+.not-found-page a {
+  color: #4da3ff;
+}
+
 /* ===== ドロップダウン基礎 ===== */
 .nav-dropdown {
   position: static;

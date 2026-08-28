@@ -19,6 +19,7 @@ export default async function GenresSearchPage() {
 
   return (
     <main style={{ padding: "24px", background: "#111", color: "#fff", minHeight: "100vh" }}>
+      <style>{`.advertisement { display: none; }`}</style>
       <h1 style={{ fontSize: "28px", marginBottom: "24px" }}>ジャンル検索確認ページ</h1>
 
       {targets.map((target) => {

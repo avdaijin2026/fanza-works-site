@@ -2,6 +2,7 @@ import Link from "next/link";
 import "./globals.css";
 import Script from "next/script";
 import HeaderSearchForm from "../components/HeaderSearchForm";
+import Advertisement from "../components/Advertisement";
 
 export const metadata = {
   title: "AV大臣",
@@ -57,7 +58,9 @@ export default function RootLayout({
           </div>
         </header>
 
+        <Advertisement position="top" />
         <main>{children}</main>
+        <Advertisement position="bottom" />
         <footer
           style={{
             marginTop: "3rem",
