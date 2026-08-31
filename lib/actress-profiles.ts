@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { cache } from "react";
 
 export type ActressProfile = {
   id: string;
@@ -19,6 +20,11 @@ export type ActressProfile = {
     large?: string;
     list?: string;
   };
+};
+
+export type ActressProfileResult = {
+  profile: ActressProfile | null;
+  status: "available" | "not-found" | "unavailable";
 };
 
 type ActressProfileCacheEntry = {
@@ -189,7 +195,7 @@ async function fetchActressProfile(actressId: string) {
     ? normalizeActressProfile(actresses[0])
     : null;
 
-  if (!response.ok || String(resultStatus) !== "200" || !profile) {
+  if (!response.ok || String(resultStatus) !== "200") {
     throw new Error(
       `女優プロフィールデータの取得に失敗しました: HTTP ${
         response.status
@@ -197,12 +203,26 @@ async function fetchActressProfile(actressId: string) {
     );
   }
 
+  if (!Array.isArray(actresses)) {
+    throw new Error("女優プロフィールデータの形式が不正です");
+  }
+
+  if (actresses.length === 0) {
+    return null;
+  }
+
+  if (!profile) {
+    throw new Error("女優プロフィールデータの内容が不正です");
+  }
+
   return profile;
 }
 
-export async function getActressProfile(actressId: string) {
+export const getActressProfileResult = cache(async function getActressProfileResult(
+  actressId: string
+): Promise<ActressProfileResult> {
   if (!/^\d+$/.test(actressId)) {
-    return null;
+    return { profile: null, status: "not-found" };
   }
 
   const cachedProfile = await readActressProfileCache(actressId);
@@ -212,14 +232,19 @@ export async function getActressProfile(actressId: string) {
     Date.now() - Date.parse(cachedProfile.savedAt) <=
       ACTRESS_PROFILE_CACHE_TTL_MS
   ) {
-    return cachedProfile.profile;
+    return { profile: cachedProfile.profile, status: "available" };
   }
 
   try {
     const profile = await fetchActressProfile(actressId);
+
+    if (!profile) {
+      return { profile: null, status: "not-found" };
+    }
+
     await saveActressProfileCache(actressId, profile);
 
-    return profile;
+    return { profile, status: "available" };
   } catch (error) {
     console.error("Actress profile fetch error:", {
       actressId,
@@ -227,6 +252,12 @@ export async function getActressProfile(actressId: string) {
       cacheFallback: !!cachedProfile,
     });
 
-    return cachedProfile?.profile ?? null;
+    return cachedProfile
+      ? { profile: cachedProfile.profile, status: "available" }
+      : { profile: null, status: "unavailable" };
   }
+});
+
+export async function getActressProfile(actressId: string) {
+  return (await getActressProfileResult(actressId)).profile;
 }

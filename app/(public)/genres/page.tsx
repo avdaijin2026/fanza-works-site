@@ -1,5 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { genreGroups } from "@/lib/genre-groups";
+
+export const metadata: Metadata = {
+  alternates: {
+    canonical: "https://avdizin.com/genres",
+  },
+};
 
 export default function GenresPage() {
   return (

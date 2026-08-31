@@ -1,14 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getWorks, type WorkSort } from "@/lib/dmm";
-
-const SITE_URL = "https://avdizin.com";
-
-export const metadata: Metadata = {
-  alternates: {
-    canonical: `${SITE_URL}/`,
-  },
-};
+import { createCanonicalUrl } from "@/lib/seo";
 
 const sortTabs: { label: string; value: WorkSort }[] = [
   { label: "人気順", value: "rank" },
@@ -61,24 +54,48 @@ function getPagination(currentPage: number, totalPages: number) {
   ];
 }
 
+type HomeSearchParams = {
+  page?: string;
+  genre?: string;
+  genre_name?: string;
+  series?: string;
+  series_name?: string;
+  maker?: string;
+  maker_name?: string;
+  actress?: string;
+  actress_name?: string;
+  label?: string;
+  label_name?: string;
+  keyword?: string;
+  sort?: string;
+};
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<HomeSearchParams>;
+}): Promise<Metadata> {
+  const params = await searchParams;
+  const isKeywordSearch = Boolean(params.keyword?.trim());
+
+  return {
+    robots: {
+      index: !isKeywordSearch,
+      follow: true,
+    },
+    alternates: {
+      canonical: createCanonicalUrl("/", {
+        page: params.page,
+        filters: { keyword: params.keyword },
+      }),
+    },
+  };
+}
+
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    page?: string;
-    genre?: string;
-    genre_name?: string;
-    series?: string;
-    series_name?: string;
-    maker?: string;
-    maker_name?: string;
-    actress?: string;
-    actress_name?: string;
-    label?: string;
-    label_name?: string;
-    keyword?: string;
-    sort?: string;
-  }>;
+  searchParams: Promise<HomeSearchParams>;
 }) {
   const params = await searchParams;
   const currentPage = Number(params.page || "1");

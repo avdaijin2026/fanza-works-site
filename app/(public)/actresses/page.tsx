@@ -1,5 +1,7 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getActresses } from "@/lib/dmm";
+import { createCanonicalUrl } from "@/lib/seo";
 
 function getPagination(currentPage: number, totalPages: number) {
   const pages: (number | string)[] = [];
@@ -42,6 +44,28 @@ type SearchParams = Promise<{
   page?: string;
   keyword?: string;
 }>;
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}): Promise<Metadata> {
+  const params = await searchParams;
+  const isKeywordSearch = Boolean(params.keyword?.trim());
+
+  return {
+    robots: {
+      index: !isKeywordSearch,
+      follow: true,
+    },
+    alternates: {
+      canonical: createCanonicalUrl("/actresses", {
+        page: params.page,
+        filters: { keyword: params.keyword },
+      }),
+    },
+  };
+}
 
 export default async function ActressesPage({
   searchParams,
@@ -174,9 +198,7 @@ export default async function ActressesPage({
               return (
                 <Link
                   key={actressId}
-                  href={`/?actress=${encodeURIComponent(
-                    String(actressId)
-                  )}&actress_name=${encodeURIComponent(actressName)}`}
+                  href={`/actresses/${encodeURIComponent(String(actressId))}`}
                   style={{
                     display: "block",
                     textDecoration: "none",

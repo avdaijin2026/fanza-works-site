@@ -6,6 +6,7 @@ import Breadcrumb, { type BreadcrumbItem } from "@/components/Breadcrumb";
 import BreadcrumbJsonLd from "@/components/StructuredData/BreadcrumbJsonLd";
 import { getWorks, type WorkSort } from "@/lib/dmm";
 import { genreGroups } from "@/lib/genre-groups";
+import { createCanonicalUrl } from "@/lib/seo";
 
 const SITE_URL = "https://avdizin.com";
 
@@ -132,12 +133,23 @@ export async function generateMetadata({
   const genreId = requireValidGenreId(id);
   const currentPage = normalizePage(query.page);
   const currentSort = normalizeWorkSort(query.sort);
-  const { title } = await getGenrePageData(genreId, currentPage, currentSort);
+  const { dataStatus, title, totalCount } = await getGenrePageData(
+    genreId,
+    currentPage,
+    currentSort
+  );
+  const isConfirmedEmpty = dataStatus === "fresh" && totalCount === 0;
 
   return {
     title,
+    robots: {
+      index: !isConfirmedEmpty,
+      follow: true,
+    },
     alternates: {
-      canonical: `${SITE_URL}/genres/${encodeURIComponent(genreId)}`,
+      canonical: createCanonicalUrl(`/genres/${encodeURIComponent(genreId)}`, {
+        page: query.page,
+      }),
     },
   };
 }

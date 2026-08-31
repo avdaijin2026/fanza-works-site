@@ -5,8 +5,12 @@ import { cache } from "react";
 import Breadcrumb, { type BreadcrumbItem } from "@/components/Breadcrumb";
 import BreadcrumbJsonLd from "@/components/StructuredData/BreadcrumbJsonLd";
 import { getActressDescription } from "@/lib/actress-descriptions";
-import { getActressProfile, type ActressProfile } from "@/lib/actress-profiles";
+import {
+  getActressProfileResult,
+  type ActressProfile,
+} from "@/lib/actress-profiles";
 import { getWorks, type WorkSort } from "@/lib/dmm";
+import { createCanonicalUrl } from "@/lib/seo";
 
 const SITE_URL = "https://avdizin.com";
 
@@ -376,7 +380,10 @@ export async function generateMetadata({
     title,
     description: metaDescription,
     alternates: {
-      canonical: `${SITE_URL}/actresses/${encodeURIComponent(actressId)}`,
+      canonical: createCanonicalUrl(
+        `/actresses/${encodeURIComponent(actressId)}`,
+        { page: query.page }
+      ),
     },
   };
 }
@@ -391,11 +398,15 @@ export default async function ActressWorksPage({
   const currentSort = normalizeWorkSort(query.sort);
   const [
     { items, totalPages, totalCount, title, actressName, summary },
-    actressProfile,
+    actressProfileResult,
   ] = await Promise.all([
     getActressPageData(actressId, currentPage, currentSort),
-    getActressProfile(actressId),
+    getActressProfileResult(actressId),
   ]);
+  if (actressProfileResult.status === "not-found") {
+    notFound();
+  }
+  const actressProfile = actressProfileResult.profile;
   const displayName =
     actressName || actressProfile?.name || `女優ID ${actressId}`;
   const profileImage = getProfileImage(actressProfile);

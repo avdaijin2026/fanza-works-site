@@ -5,6 +5,7 @@ import { cache } from "react";
 import Breadcrumb, { type BreadcrumbItem } from "@/components/Breadcrumb";
 import BreadcrumbJsonLd from "@/components/StructuredData/BreadcrumbJsonLd";
 import { getWorks, type WorkSort } from "@/lib/dmm";
+import { createCanonicalUrl } from "@/lib/seo";
 
 const SITE_URL = "https://avdizin.com";
 
@@ -145,12 +146,23 @@ export async function generateMetadata({
   const seriesId = requireValidSeriesId(id);
   const currentPage = normalizePage(query.page);
   const currentSort = normalizeWorkSort(query.sort);
-  const { title } = await getSeriesPageData(seriesId, currentPage, currentSort);
+  const { dataStatus, title, totalCount } = await getSeriesPageData(
+    seriesId,
+    currentPage,
+    currentSort
+  );
+  const isConfirmedEmpty = dataStatus === "fresh" && totalCount === 0;
 
   return {
     title,
+    robots: {
+      index: !isConfirmedEmpty,
+      follow: true,
+    },
     alternates: {
-      canonical: `${SITE_URL}/series/${encodeURIComponent(seriesId)}`,
+      canonical: createCanonicalUrl(`/series/${encodeURIComponent(seriesId)}`, {
+        page: query.page,
+      }),
     },
   };
 }

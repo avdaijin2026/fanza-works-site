@@ -834,11 +834,26 @@ export async function getWorks(
         `&output=json`;
 
       const json = await fetchItemListWithRetry(requestUrl);
-      const batch = Array.isArray(json?.result?.items)
-        ? json.result.items
-        : [];
+      const rawItems = json?.result?.items;
+      const rawTotalCount = json?.result?.total_count;
 
-      totalCount = Number(json?.result?.total_count ?? totalCount);
+      if (
+        !Array.isArray(rawItems) ||
+        !Number.isFinite(Number(rawTotalCount)) ||
+        Number(rawTotalCount) < 0
+      ) {
+        throw new ItemListRequestError(
+          "作品データのレスポンス形式が不正です",
+          200,
+          json?.result?.status,
+          json?.result?.message,
+          json?.result?.errors
+        );
+      }
+
+      const batch = rawItems;
+
+      totalCount = Number(rawTotalCount);
 
       if (batch.length === 0) {
         break;
@@ -876,7 +891,7 @@ export async function getWorks(
 
     await saveGetWorksCache(conditions, result);
 
-    return result;
+    return { ...result, dataStatus: "fresh" as const };
   } catch (error) {
     const requestError =
       error instanceof ItemListRequestError ? error : null;
@@ -908,6 +923,7 @@ export async function getWorks(
         items: cachedResult.items,
         totalPages: cachedResult.totalPages,
         totalCount: cachedResult.totalCount,
+        dataStatus: "stale-cache" as const,
       };
     }
 
@@ -917,6 +933,7 @@ export async function getWorks(
       items: [],
       totalPages: 1,
       totalCount: 0,
+      dataStatus: "unavailable" as const,
     };
   }
 }

@@ -1,4 +1,12 @@
+import type { Metadata } from "next";
 import { getGenres } from "@/lib/dmm";
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 const initials = ["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ"];
 

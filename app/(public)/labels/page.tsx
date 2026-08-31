@@ -1,5 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { labelGroups } from "@/lib/label-groups";
+
+export const metadata: Metadata = {
+  alternates: {
+    canonical: "https://avdizin.com/labels",
+  },
+};
 
 export default function LabelsPage() {
   return (

@@ -87,9 +87,7 @@ export default async function PopularActressesRankingPage() {
             }}
           >
             {ranking.map((actress: ActressRankingEntry, index: number) => {
-              const href = `/?actress=${encodeURIComponent(
-                actress.id
-              )}&actress_name=${encodeURIComponent(actress.name)}`;
+              const href = `/actresses/${encodeURIComponent(actress.id)}`;
 
               return (
                 <article

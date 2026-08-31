@@ -1,5 +1,7 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getSeries } from "@/lib/dmm";
+import { createCanonicalUrl } from "@/lib/seo";
 
 const initials = [
   "あ", "い", "う", "え", "お",
@@ -14,10 +16,33 @@ const initials = [
   "わ",
 ];
 
+type SeriesSearchParams = {
+  initial?: string;
+  page?: string;
+};
+
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<SeriesSearchParams>;
+}): Promise<Metadata> {
+  const params = await searchParams;
+  const initial = params.initial?.trim();
+
+  return {
+    alternates: {
+      canonical: createCanonicalUrl("/series", {
+        page: params.page,
+        filters: { initial: initial && initial !== "あ" ? initial : undefined },
+      }),
+    },
+  };
+}
+
 export default async function SeriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ initial?: string; page?: string }>;
+  searchParams: Promise<SeriesSearchParams>;
 }) {
   const params = await searchParams;
   const initial = params.initial || "あ";
