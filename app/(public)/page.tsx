@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { getWorks, type WorkSort } from "@/lib/dmm";
-import { createCanonicalUrl } from "@/lib/seo";
+import { createCanonicalUrl, validatePage } from "@/lib/seo";
 
 const sortTabs: { label: string; value: WorkSort }[] = [
   { label: "人気順", value: "rank" },
@@ -55,7 +56,7 @@ function getPagination(currentPage: number, totalPages: number) {
 }
 
 type HomeSearchParams = {
-  page?: string;
+  page?: string | string[];
   genre?: string;
   genre_name?: string;
   series?: string;
@@ -76,6 +77,10 @@ export async function generateMetadata({
   searchParams: Promise<HomeSearchParams>;
 }): Promise<Metadata> {
   const params = await searchParams;
+  const pageValidation = validatePage(params.page);
+  if (pageValidation.status !== "valid") {
+    return { robots: { index: false, follow: false } };
+  }
   const isKeywordSearch = Boolean(params.keyword?.trim());
 
   return {
@@ -85,7 +90,7 @@ export async function generateMetadata({
     },
     alternates: {
       canonical: createCanonicalUrl("/", {
-        page: params.page,
+        page: String(pageValidation.page),
         filters: { keyword: params.keyword },
       }),
     },
@@ -98,7 +103,9 @@ export default async function HomePage({
   searchParams: Promise<HomeSearchParams>;
 }) {
   const params = await searchParams;
-  const currentPage = Number(params.page || "1");
+  const pageValidation = validatePage(params.page);
+  if (pageValidation.status !== "valid") notFound();
+  const currentPage = pageValidation.page;
   const currentSort = normalizeWorkSort(params.sort);
 
   const genreId = params.genre;
@@ -123,6 +130,8 @@ export default async function HomePage({
     keyword,
     currentSort
   );
+
+  if (result.dataStatus === "out-of-range") notFound();
 
   const items = result.items;
   const totalPages = result.totalPages;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { cache } from "react";
+import { withFanzaInFlight } from "@/lib/in-flight-limiter";
 
 export type ActressProfile = {
   id: string;
@@ -187,8 +188,11 @@ async function fetchActressProfile(actressId: string) {
     `&offset=1` +
     `&output=json`;
 
-  const response = await fetch(url, { cache: "no-store" });
-  const json = await response.json();
+  const { response, json } = await withFanzaInFlight(url, async () => {
+    const response = await fetch(url, { cache: "no-store" });
+    const json = await response.json();
+    return { response, json };
+  });
   const resultStatus = json?.result?.status;
   const actresses = json?.result?.actress ?? json?.result?.items ?? [];
   const profile = Array.isArray(actresses)

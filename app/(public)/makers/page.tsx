@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { getMakers } from "@/lib/dmm";
-import { createCanonicalUrl } from "@/lib/seo";
+import { createCanonicalUrl, validatePage } from "@/lib/seo";
 
 const initials = [
   "あ", "い", "う", "え", "お",
@@ -18,7 +19,7 @@ const initials = [
 
 type MakerSearchParams = {
   initial?: string;
-  page?: string;
+  page?: string | string[];
 };
 
 export async function generateMetadata({
@@ -27,12 +28,14 @@ export async function generateMetadata({
   searchParams: Promise<MakerSearchParams>;
 }): Promise<Metadata> {
   const params = await searchParams;
+  const pageValidation = validatePage(params.page);
+  if (pageValidation.status !== "valid") return { robots: { index: false, follow: false } };
   const initial = params.initial?.trim();
 
   return {
     alternates: {
       canonical: createCanonicalUrl("/makers", {
-        page: params.page,
+        page: String(pageValidation.page),
         filters: { initial: initial && initial !== "あ" ? initial : undefined },
       }),
     },
@@ -45,8 +48,10 @@ export default async function MakersPage({
   searchParams: Promise<MakerSearchParams>;
 }) {
   const params = await searchParams;
+  const pageValidation = validatePage(params.page);
+  if (pageValidation.status !== "valid") notFound();
   const initial = params.initial || "あ";
-  const page = Number(params.page || "1");
+  const page = pageValidation.page;
 
   const { makers, totalCount, totalPages } = await getMakers(initial, page);
 

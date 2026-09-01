@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { getActresses } from "@/lib/dmm";
-import { createCanonicalUrl } from "@/lib/seo";
+import { createCanonicalUrl, validatePage } from "@/lib/seo";
 
 function getPagination(currentPage: number, totalPages: number) {
   const pages: (number | string)[] = [];
@@ -41,7 +42,7 @@ function getPagination(currentPage: number, totalPages: number) {
 }
 
 type SearchParams = Promise<{
-  page?: string;
+  page?: string | string[];
   keyword?: string;
 }>;
 
@@ -51,6 +52,10 @@ export async function generateMetadata({
   searchParams: SearchParams;
 }): Promise<Metadata> {
   const params = await searchParams;
+  const pageValidation = validatePage(params.page);
+  if (pageValidation.status !== "valid") {
+    return { robots: { index: false, follow: false } };
+  }
   const isKeywordSearch = Boolean(params.keyword?.trim());
 
   return {
@@ -60,7 +65,7 @@ export async function generateMetadata({
     },
     alternates: {
       canonical: createCanonicalUrl("/actresses", {
-        page: params.page,
+        page: String(pageValidation.page),
         filters: { keyword: params.keyword },
       }),
     },
@@ -73,10 +78,14 @@ export default async function ActressesPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  const currentPage = Number(params.page || "1");
+  const pageValidation = validatePage(params.page);
+  if (pageValidation.status !== "valid") notFound();
+  const currentPage = pageValidation.page;
   const keyword = params.keyword?.trim() || "";
 
-  const { actresses, totalPages } = await getActresses(currentPage, keyword);
+  const result = await getActresses(currentPage, keyword);
+  if (result.dataStatus === "out-of-range") notFound();
+  const { actresses, totalPages } = result;
 
   const visibleActresses = actresses.filter((actress: any) => {
     const image =

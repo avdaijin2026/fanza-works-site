@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { validatePage } from "@/lib/seo";
 
 const idPattern = /^\d+$/;
 const redirectTargets = {
@@ -53,6 +54,11 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const pageValidation = validatePage(searchParams.get("page") ?? undefined);
+  if (pageValidation.status !== "valid") {
+    return NextResponse.next();
+  }
+
   const destination = nextUrl.clone();
   destination.pathname = `${redirectTargets[redirectKey]}/${encodeURIComponent(id)}`;
   destination.search = "";
@@ -60,8 +66,8 @@ export function proxy(request: NextRequest) {
   const page = searchParams.get("page");
   const sort = searchParams.get("sort");
 
-  if (page) {
-    destination.searchParams.set("page", page);
+  if (pageValidation.page > 1) {
+    destination.searchParams.set("page", String(pageValidation.page));
   }
 
   if (sort) {

@@ -1,6 +1,7 @@
 import { MetadataRoute } from "next";
 import { genreIdMap } from "@/lib/genre-id-map";
 import { labelIdMap } from "@/lib/label-id-map";
+import { withFanzaInFlight } from "@/lib/in-flight-limiter";
 
 const BASE_URL = "https://avdizin.com";
 const WORKS_PER_PAGE = 20;
@@ -64,10 +65,14 @@ async function getSitemapWorks(limit: number) {
       sort: "rank",
       output: "json",
     });
-    const response = await fetch(
-      `https://api.dmm.com/affiliate/v3/ItemList?${params}`,
-      { next: { revalidate: SITEMAP_REVALIDATE_SECONDS } }
-    );
+    const requestUrl = `https://api.dmm.com/affiliate/v3/ItemList?${params}`;
+    const { response, json } = await withFanzaInFlight(requestUrl, async () => {
+      const response = await fetch(requestUrl, {
+        next: { revalidate: SITEMAP_REVALIDATE_SECONDS },
+      });
+      const json = await response.json();
+      return { response, json };
+    });
 
     if (!response.ok) {
       throw new Error(
@@ -75,7 +80,6 @@ async function getSitemapWorks(limit: number) {
       );
     }
 
-    const json = await response.json();
     const items = Array.isArray(json?.result?.items)
       ? json.result.items
       : [];

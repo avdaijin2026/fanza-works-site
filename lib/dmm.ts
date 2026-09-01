@@ -15,6 +15,11 @@ import {
   type GetWorksCacheConditions,
   type RelatedActressWorksCacheConditions,
 } from "@/lib/cache-paths";
+import { MAX_PUBLIC_PAGE } from "@/lib/seo";
+import {
+  InFlightLimitError,
+  withFanzaInFlight,
+} from "@/lib/in-flight-limiter";
 
 export type WorkSort = "rank" | "date" | "review" | "price" | "-price";
 
@@ -48,6 +53,7 @@ const DETAIL_CACHE_SCHEMA_VERSION = 1;
 const POPULAR_ACTRESS_RANKING_CACHE_SCHEMA_VERSION = 1;
 const RELATED_ACTRESS_WORKS_CACHE_SCHEMA_VERSION = 1;
 const RELATED_ACTRESS_WORKS_CACHE_FRESH_MS = 6 * 60 * 60 * 1000;
+const ITEM_LIST_MAX_OFFSET = 50_000;
 
 type GetWorksConditions = GetWorksCacheConditions & {
   sort: WorkSort;
@@ -68,6 +74,7 @@ type ActressesListResult = {
   actresses: any[];
   totalPages: number;
   totalCount: number;
+  dataStatus?: "fresh" | "stale-cache" | "unavailable" | "out-of-range";
 };
 
 type ActressesListCacheEntry = {
@@ -99,6 +106,23 @@ type RelatedActressWorksCacheEntry = {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withInFlightDedup<T>(url: string, operation: () => Promise<T>) {
+  return withFanzaInFlight(url, operation);
+}
+
+async function fetchJsonWithInFlight(
+  url: string,
+  init: RequestInit
+// FANZA's response schema is endpoint-specific and normalized by each caller.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ response: Response; json: any }> {
+  return withInFlightDedup(url, async () => {
+    const response = await fetch(url, init);
+    const json = await response.json();
+    return { response, json };
+  });
 }
 
 function createGetWorksConditions(
@@ -500,17 +524,6 @@ function selectRelatedActressWorks(
     .slice(0, limit);
 }
 
-function redactFanzaApiUrl(url: string) {
-  try {
-    const parsedUrl = new URL(url);
-    parsedUrl.searchParams.delete("api_id");
-    parsedUrl.searchParams.delete("affiliate_id");
-    return parsedUrl.toString();
-  } catch {
-    return url;
-  }
-}
-
 function sanitizeFanzaLogValue(value: unknown): unknown {
   const sensitiveValues = [
     process.env.DMM_API_ID,
@@ -554,17 +567,49 @@ function logFanzaApiError(
   responseErrors?: unknown,
   resultStatus?: unknown
 ) {
+  const parsed = (() => {
+    try {
+      const value = new URL(url);
+      const rawOffset = value.searchParams.get("offset");
+      const offset = rawOffset && /^\d+$/.test(rawOffset) ? Number(rawOffset) : null;
+      return {
+        api: value.pathname.split("/").pop() || "unknown",
+        offset,
+      };
+    } catch {
+      return { api: "unknown", offset: null };
+    }
+  })();
+  const key = `${parsed.api}|${status ?? "network"}|${String(resultStatus)}|${Math.floor((parsed.offset ?? 0) / 100)}`;
+  const now = Date.now();
+  const bucket = apiErrorLogBuckets.get(key);
+
+  if (bucket && now - bucket.lastLoggedAt < 60_000) {
+    bucket.count += 1;
+    return;
+  }
+
+  if (apiErrorLogBuckets.size >= 256) apiErrorLogBuckets.clear();
+  apiErrorLogBuckets.set(key, { count: (bucket?.count ?? 0) + 1, lastLoggedAt: now });
   console.error(message, {
+    timestamp: new Date(now).toISOString(),
+    api: parsed.api,
     status,
     resultStatus: sanitizeFanzaLogValue(resultStatus),
-    url: redactFanzaApiUrl(url),
+    offset: parsed.offset,
     responseMessage: sanitizeFanzaLogValue(responseMessage),
     responseErrors: sanitizeFanzaLogValue(responseErrors),
+    suppressedInWindow: bucket?.count ?? 0,
     error: sanitizeFanzaLogValue(
       error instanceof Error ? error.message : String(error)
     ),
   });
 }
+
+const apiErrorLogBuckets = new Map<
+  string,
+  { count: number; lastLoggedAt: number }
+>();
 
 class ItemListRequestError extends Error {
   status: number | null;
@@ -605,6 +650,10 @@ function shouldRetryItemListHttpStatus(status: number) {
 }
 
 async function fetchItemListWithRetry(url: string) {
+  return withInFlightDedup(url, () => fetchItemListWithRetryUnshared(url));
+}
+
+async function fetchItemListWithRetryUnshared(url: string) {
   const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -694,8 +743,7 @@ export async function getDetail(contentId: string) {
     `&output=json`;
 
   try {
-    const response = await fetch(url, { cache: "no-store" });
-    const json = await response.json();
+    const { response, json } = await fetchJsonWithInFlight(url, { cache: "no-store" });
     const resultStatus = json?.result?.status;
     const totalCount = Number(json?.result?.total_count ?? 0);
     const items = Array.isArray(json?.result?.items)
@@ -774,6 +822,15 @@ export async function getWorks(
   keyword?: string,
   sort: WorkSort = "rank"
 ) {
+  if (!Number.isInteger(page) || page < 1 || page > MAX_PUBLIC_PAGE) {
+    return {
+      items: [],
+      totalPages: 1,
+      totalCount: 0,
+      dataStatus: "unavailable" as const,
+    };
+  }
+
   const apiId = process.env.DMM_API_ID;
   const affiliateId = process.env.DMM_AFFILIATE_ID;
   const conditions = createGetWorksConditions(
@@ -819,6 +876,22 @@ export async function getWorks(
 
   try {
     while (visibleSeen < endIndex) {
+      if (!Number.isInteger(offset) || offset < 1 || offset > ITEM_LIST_MAX_OFFSET) {
+        console.warn("FANZA ItemList request skipped: offset out of range", {
+          timestamp: new Date().toISOString(),
+          api: "ItemList",
+          offset: Number.isFinite(offset) ? offset : null,
+          page,
+          cacheResult: "unavailable",
+        });
+        return {
+          items: [],
+          totalPages: 1,
+          totalCount: 0,
+          dataStatus: "unavailable" as const,
+        };
+      }
+
       requestUrl =
         `https://api.dmm.com/affiliate/v3/ItemList` +
         `?api_id=${apiId}` +
@@ -854,6 +927,15 @@ export async function getWorks(
       const batch = rawItems;
 
       totalCount = Number(rawTotalCount);
+
+      if (page > 1 && startIndex >= totalCount) {
+        return {
+          items: [],
+          totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
+          totalCount,
+          dataStatus: "out-of-range" as const,
+        };
+      }
 
       if (batch.length === 0) {
         break;
@@ -913,11 +995,13 @@ export async function getWorks(
         Date.now() - Date.parse(cachedResult.savedAt)
       );
 
-      console.error("ItemList stale cache fallback triggered:", {
-        savedAt: cachedResult.savedAt,
-        cacheAgeMs,
-        cacheAgeMinutes: Math.floor(cacheAgeMs / 60000),
-      });
+      if (!(error instanceof InFlightLimitError)) {
+        console.error("ItemList stale cache fallback triggered:", {
+          savedAt: cachedResult.savedAt,
+          cacheAgeMs,
+          cacheAgeMinutes: Math.floor(cacheAgeMs / 60000),
+        });
+      }
 
       return {
         items: cachedResult.items,
@@ -927,7 +1011,9 @@ export async function getWorks(
       };
     }
 
-    console.error("ItemList empty fallback triggered");
+    if (!(error instanceof InFlightLimitError)) {
+      console.error("ItemList empty fallback triggered");
+    }
 
     return {
       items: [],
@@ -954,13 +1040,12 @@ async function getRankedWorksPage(offset: number) {
     `&offset=${offset}` +
     `&output=json`;
 
-  const res = await fetch(url, { next: { revalidate: 21600 } });
+  const { response: res, json } = await fetchJsonWithInFlight(url, { next: { revalidate: 21600 } });
 
   if (!res.ok) {
     throw new Error(`人気作品データの取得に失敗しました: ${res.status}`);
   }
 
-  const json = await res.json();
   const resultStatus = json?.result?.status;
 
   if (String(resultStatus) !== "200") {
@@ -993,13 +1078,12 @@ async function getRankingActressProfile(actressId: string) {
     `&offset=1` +
     `&output=json`;
 
-  const res = await fetch(url, { next: { revalidate: 21600 } });
+  const { response: res, json } = await fetchJsonWithInFlight(url, { next: { revalidate: 21600 } });
 
   if (!res.ok) {
     throw new Error(`女優画像データの取得に失敗しました: ${res.status}`);
   }
 
-  const json = await res.json();
   const resultStatus = json?.result?.status;
 
   if (String(resultStatus) !== "200") {
@@ -1361,14 +1445,13 @@ export async function getGenres(initial = "あ") {
     `&output=json`;
 
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const { response: res, json } = await fetchJsonWithInFlight(url, { cache: "no-store" });
 
     if (!res.ok) {
       console.error("GenreSearch failed:", initial, res.status, url);
       return [];
     }
 
-    const json = await res.json();
     const result = json?.result;
 
     let list: any[] = [];
@@ -1392,6 +1475,15 @@ export async function getGenres(initial = "あ") {
 }
 
 export async function getActresses(page = 1, keyword?: string) {
+  if (!Number.isInteger(page) || page < 1 || page > MAX_PUBLIC_PAGE) {
+    return {
+      actresses: [],
+      totalPages: 1,
+      totalCount: 0,
+      dataStatus: "unavailable" as const,
+    };
+  }
+
   const apiId = process.env.DMM_API_ID;
   const affiliateId = process.env.DMM_AFFILIATE_ID;
 
@@ -1438,18 +1530,20 @@ export async function getActresses(page = 1, keyword?: string) {
         `${keywordParam}` +
         `&output=json`;
 
-      const res = await fetch(url, { cache: "no-store" });
-      let json: any;
-
-      try {
-        json = await res.json();
-      } catch {
-        throw new ActressSearchRequestError(
-          "ActressSearch JSON parse failed",
-          res.status,
-          undefined
-        );
-      }
+      const { res, json } = await withInFlightDedup(url, async () => {
+        const response = await fetch(url, { cache: "no-store" });
+        let body: any;
+        try {
+          body = await response.json();
+        } catch {
+          throw new ActressSearchRequestError(
+            "ActressSearch JSON parse failed",
+            response.status,
+            undefined
+          );
+        }
+        return { res: response, json: body };
+      });
 
       const result = json?.result;
       const resultStatus = result?.status;
@@ -1468,6 +1562,19 @@ export async function getActresses(page = 1, keyword?: string) {
       const batch = result?.actress ?? result?.items;
 
       rawTotalCount = Number(result?.total_count ?? rawTotalCount ?? 0);
+
+      if (
+        Number.isFinite(rawTotalCount) &&
+        rawTotalCount >= 0 &&
+        page > 1 && startIndex >= rawTotalCount
+      ) {
+        return {
+          actresses: [],
+          totalPages: Math.max(1, Math.ceil(rawTotalCount / fetchHits)),
+          totalCount: rawTotalCount,
+          dataStatus: "out-of-range" as const,
+        };
+      }
 
       if (!Array.isArray(batch)) {
         throw new ActressSearchRequestError(
@@ -1508,26 +1615,33 @@ export async function getActresses(page = 1, keyword?: string) {
       actresses,
       totalPages: Math.max(1, Math.ceil(rawTotalCount / fetchHits)),
       totalCount: rawTotalCount,
+      dataStatus: "fresh" as const,
     };
 
-    await saveActressesListCache(conditions, result);
+    await saveActressesListCache(conditions, {
+      actresses: result.actresses,
+      totalPages: result.totalPages,
+      totalCount: result.totalCount,
+    });
 
     return result;
   } catch (error) {
     const requestError =
       error instanceof ActressSearchRequestError ? error : null;
 
-    console.error("ActressSearch list error:", {
-      status: requestError?.status ?? null,
-      resultStatus: sanitizeFanzaLogValue(requestError?.resultStatus),
-      page: conditions.page,
-      keywordPresent: conditions.keyword.length > 0,
-      hits: conditions.hits,
-      offset,
-      error: sanitizeFanzaLogValue(
-        error instanceof Error ? error.message : String(error)
-      ),
-    });
+    if (!(error instanceof InFlightLimitError)) {
+      console.error("ActressSearch list error:", {
+        status: requestError?.status ?? null,
+        resultStatus: sanitizeFanzaLogValue(requestError?.resultStatus),
+        page: conditions.page,
+        keywordPresent: conditions.keyword.length > 0,
+        hits: conditions.hits,
+        offset,
+        error: sanitizeFanzaLogValue(
+          error instanceof Error ? error.message : String(error)
+        ),
+      });
+    }
 
     const cachedResult = await readActressesListCache(conditions);
 
@@ -1537,35 +1651,44 @@ export async function getActresses(page = 1, keyword?: string) {
         Date.now() - Date.parse(cachedResult.savedAt)
       );
 
-      console.error("ActressSearch list stale cache fallback triggered:", {
-        savedAt: cachedResult.savedAt,
-        cacheAgeMs,
-        cacheAgeMinutes: Math.floor(cacheAgeMs / 60000),
+      if (!(error instanceof InFlightLimitError)) {
+        console.error("ActressSearch list stale cache fallback triggered:", {
+          savedAt: cachedResult.savedAt,
+          cacheAgeMs,
+          cacheAgeMinutes: Math.floor(cacheAgeMs / 60000),
+          page: conditions.page,
+          keywordPresent: conditions.keyword.length > 0,
+          hits: conditions.hits,
+          offset: conditions.offset,
+        });
+      }
+
+      return { ...cachedResult.result, dataStatus: "stale-cache" as const };
+    }
+
+    if (!(error instanceof InFlightLimitError)) {
+      console.error("ActressSearch list empty fallback triggered:", {
         page: conditions.page,
         keywordPresent: conditions.keyword.length > 0,
         hits: conditions.hits,
         offset: conditions.offset,
       });
-
-      return cachedResult.result;
     }
-
-    console.error("ActressSearch list empty fallback triggered:", {
-      page: conditions.page,
-      keywordPresent: conditions.keyword.length > 0,
-      hits: conditions.hits,
-      offset: conditions.offset,
-    });
 
     return {
       actresses: [],
       totalPages: 1,
       totalCount: 0,
+      dataStatus: "unavailable" as const,
     };
   }
 }
 
 export async function getSeries(initial = "あ", page = 1) {
+  if (!Number.isInteger(page) || page < 1 || page > MAX_PUBLIC_PAGE) {
+    return { series: [], totalCount: 0, totalPages: 1 };
+  }
+
   const apiId = process.env.DMM_API_ID;
   const affiliateId = process.env.DMM_AFFILIATE_ID;
 
@@ -1583,7 +1706,7 @@ export async function getSeries(initial = "あ", page = 1) {
     `&output=json`;
 
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const { response: res, json } = await fetchJsonWithInFlight(url, { cache: "no-store" });
 
     if (!res.ok) {
       console.error("SeriesSearch failed:", initial, res.status, url);
@@ -1594,7 +1717,6 @@ export async function getSeries(initial = "あ", page = 1) {
       };
     }
 
-    const json = await res.json();
     const result = json?.result;
 
     let list: any[] = [];
@@ -1617,6 +1739,10 @@ export async function getSeries(initial = "あ", page = 1) {
     const totalCount = Number(result?.total_count ?? series.length ?? 0);
     const totalPages = Math.max(1, Math.ceil(totalCount / hits));
 
+    if (page > 1 && (page - 1) * hits >= totalCount) {
+      return { series: [], totalCount, totalPages };
+    }
+
     return {
       series,
       totalCount,
@@ -1633,6 +1759,10 @@ export async function getSeries(initial = "あ", page = 1) {
 }
 
 export async function getMakers(initial = "あ", page = 1) {
+  if (!Number.isInteger(page) || page < 1 || page > MAX_PUBLIC_PAGE) {
+    return { makers: [], totalCount: 0, totalPages: 1 };
+  }
+
   const apiId = process.env.DMM_API_ID;
   const affiliateId = process.env.DMM_AFFILIATE_ID;
 
@@ -1650,7 +1780,7 @@ export async function getMakers(initial = "あ", page = 1) {
     `&output=json`;
 
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const { response: res, json } = await fetchJsonWithInFlight(url, { cache: "no-store" });
 
     if (!res.ok) {
       console.error("MakerSearch failed:", initial, res.status, url);
@@ -1661,7 +1791,6 @@ export async function getMakers(initial = "あ", page = 1) {
       };
     }
 
-    const json = await res.json();
     const result = json?.result;
 
     let list: any[] = [];
@@ -1683,6 +1812,10 @@ export async function getMakers(initial = "あ", page = 1) {
 
     const totalCount = Number(result?.total_count ?? makers.length ?? 0);
     const totalPages = Math.max(1, Math.ceil(totalCount / hits));
+
+    if (page > 1 && (page - 1) * hits >= totalCount) {
+      return { makers: [], totalCount, totalPages };
+    }
 
     return {
       makers,

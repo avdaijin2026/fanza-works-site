@@ -5,7 +5,7 @@ import { cache } from "react";
 import Breadcrumb, { type BreadcrumbItem } from "@/components/Breadcrumb";
 import BreadcrumbJsonLd from "@/components/StructuredData/BreadcrumbJsonLd";
 import { getWorks, type WorkSort } from "@/lib/dmm";
-import { createCanonicalUrl } from "@/lib/seo";
+import { createCanonicalUrl, validatePage } from "@/lib/seo";
 
 const SITE_URL = "https://avdizin.com";
 
@@ -20,7 +20,7 @@ const sortTabs: { label: string; value: WorkSort }[] = [
 type PageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
-    page?: string;
+    page?: string | string[];
     sort?: string;
   }>;
 };
@@ -49,12 +49,6 @@ function requireValidMakerId(value: string) {
   }
 
   return value;
-}
-
-function normalizePage(page?: string) {
-  const value = Number(page || "1");
-
-  return Number.isInteger(value) && value > 0 ? value : 1;
 }
 
 function normalizeWorkSort(sort?: string): WorkSort {
@@ -144,7 +138,9 @@ export async function generateMetadata({
 }: PageProps): Promise<Metadata> {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const makerId = requireValidMakerId(id);
-  const currentPage = normalizePage(query.page);
+  const pageValidation = validatePage(query.page);
+  if (pageValidation.status !== "valid") return { robots: { index: false, follow: false } };
+  const currentPage = pageValidation.page;
   const currentSort = normalizeWorkSort(query.sort);
   const { dataStatus, title, totalCount } = await getMakerPageData(
     makerId,
@@ -152,6 +148,7 @@ export async function generateMetadata({
     currentSort
   );
   const isConfirmedEmpty = dataStatus === "fresh" && totalCount === 0;
+  if (dataStatus === "out-of-range") return { robots: { index: false, follow: false } };
 
   return {
     title,
@@ -161,7 +158,7 @@ export async function generateMetadata({
     },
     alternates: {
       canonical: createCanonicalUrl(`/makers/${encodeURIComponent(makerId)}`, {
-        page: query.page,
+        page: String(pageValidation.page),
       }),
     },
   };
@@ -173,13 +170,17 @@ export default async function MakerWorksPage({
 }: PageProps) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const makerId = requireValidMakerId(id);
-  const currentPage = normalizePage(query.page);
+  const pageValidation = validatePage(query.page);
+  if (pageValidation.status !== "valid") notFound();
+  const currentPage = pageValidation.page;
   const currentSort = normalizeWorkSort(query.sort);
-  const { items, totalPages, title, makerName } = await getMakerPageData(
+  const result = await getMakerPageData(
     makerId,
     currentPage,
     currentSort
   );
+  const { items, totalPages, title, makerName } = result;
+  if (result.dataStatus === "out-of-range") notFound();
   const paginationItems = getPagination(currentPage, totalPages);
   const breadcrumbItems: BreadcrumbItem[] = [
     { name: "ホーム", href: "/" },

@@ -10,7 +10,7 @@ import {
   type ActressProfile,
 } from "@/lib/actress-profiles";
 import { getWorks, type WorkSort } from "@/lib/dmm";
-import { createCanonicalUrl } from "@/lib/seo";
+import { createCanonicalUrl, validatePage } from "@/lib/seo";
 
 const SITE_URL = "https://avdizin.com";
 
@@ -25,7 +25,7 @@ const sortTabs: { label: string; value: WorkSort }[] = [
 type PageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
-    page?: string;
+    page?: string | string[];
     sort?: string;
   }>;
 };
@@ -58,12 +58,6 @@ function requireValidActressId(value: string) {
   }
 
   return value;
-}
-
-function normalizePage(page?: string) {
-  const value = Number(page || "1");
-
-  return Number.isInteger(value) && value > 0 ? value : 1;
 }
 
 function normalizeWorkSort(sort?: string): WorkSort {
@@ -368,13 +362,19 @@ export async function generateMetadata({
 }: PageProps): Promise<Metadata> {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const actressId = requireValidActressId(id);
-  const currentPage = normalizePage(query.page);
+  const pageValidation = validatePage(query.page);
+  if (pageValidation.status !== "valid") return { robots: { index: false, follow: false } };
+  const currentPage = pageValidation.page;
   const currentSort = normalizeWorkSort(query.sort);
-  const { title, metaDescription } = await getActressPageData(
+  const { title, metaDescription, dataStatus } = await getActressPageData(
     actressId,
     currentPage,
     currentSort
   );
+
+  if (dataStatus === "out-of-range") {
+    return { robots: { index: false, follow: false } };
+  }
 
   return {
     title,
@@ -382,7 +382,7 @@ export async function generateMetadata({
     alternates: {
       canonical: createCanonicalUrl(
         `/actresses/${encodeURIComponent(actressId)}`,
-        { page: query.page }
+        { page: String(pageValidation.page) }
       ),
     },
   };
@@ -394,15 +394,19 @@ export default async function ActressWorksPage({
 }: PageProps) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const actressId = requireValidActressId(id);
-  const currentPage = normalizePage(query.page);
+  const pageValidation = validatePage(query.page);
+  if (pageValidation.status !== "valid") notFound();
+  const currentPage = pageValidation.page;
   const currentSort = normalizeWorkSort(query.sort);
   const [
-    { items, totalPages, totalCount, title, actressName, summary },
+    actressPageData,
     actressProfileResult,
   ] = await Promise.all([
     getActressPageData(actressId, currentPage, currentSort),
     getActressProfileResult(actressId),
   ]);
+  const { items, totalPages, totalCount, title, actressName, summary } = actressPageData;
+  if (actressPageData.dataStatus === "out-of-range") notFound();
   if (actressProfileResult.status === "not-found") {
     notFound();
   }
