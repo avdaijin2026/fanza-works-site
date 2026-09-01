@@ -20,6 +20,10 @@ import {
   InFlightLimitError,
   withFanzaInFlight,
 } from "@/lib/in-flight-limiter";
+import {
+  logFanzaSearchFailure,
+  sanitizeFanzaLogValue,
+} from "@/lib/fanza-safe-log";
 
 export type WorkSort = "rank" | "date" | "review" | "price" | "-price";
 
@@ -522,40 +526,6 @@ function selectRelatedActressWorks(
   return items
     .filter((item: any) => item?.content_id !== currentContentId)
     .slice(0, limit);
-}
-
-function sanitizeFanzaLogValue(value: unknown): unknown {
-  const sensitiveValues = [
-    process.env.DMM_API_ID,
-    process.env.DMM_AFFILIATE_ID,
-  ].filter((sensitiveValue): sensitiveValue is string => !!sensitiveValue);
-
-  if (typeof value === "string") {
-    return sensitiveValues.reduce(
-      (sanitizedValue, sensitiveValue) =>
-        sanitizedValue.replaceAll(sensitiveValue, "[REDACTED]"),
-      value
-    );
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(sanitizeFanzaLogValue);
-  }
-
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(
-          ([key]) => key !== "api_id" && key !== "affiliate_id"
-        )
-        .map(([key, nestedValue]) => [
-          key,
-          sanitizeFanzaLogValue(nestedValue),
-        ])
-    );
-  }
-
-  return value;
 }
 
 function logFanzaApiError(
@@ -1448,7 +1418,11 @@ export async function getGenres(initial = "あ") {
     const { response: res, json } = await fetchJsonWithInFlight(url, { cache: "no-store" });
 
     if (!res.ok) {
-      console.error("GenreSearch failed:", initial, res.status, url);
+      logFanzaSearchFailure({
+        api: "GenreSearch",
+        initial,
+        status: res.status,
+      });
       return [];
     }
 
@@ -1469,7 +1443,12 @@ export async function getGenres(initial = "あ") {
       name: String(g.name ?? ""),
     }));
   } catch (error) {
-    console.error("GenreSearch error:", initial, error);
+    logFanzaSearchFailure({
+      api: "GenreSearch",
+      error,
+      initial,
+      status: null,
+    });
     return [];
   }
 }
@@ -1709,7 +1688,12 @@ export async function getSeries(initial = "あ", page = 1) {
     const { response: res, json } = await fetchJsonWithInFlight(url, { cache: "no-store" });
 
     if (!res.ok) {
-      console.error("SeriesSearch failed:", initial, res.status, url);
+      logFanzaSearchFailure({
+        api: "SeriesSearch",
+        initial,
+        offset,
+        status: res.status,
+      });
       return {
         series: [],
         totalCount: 0,
@@ -1749,7 +1733,13 @@ export async function getSeries(initial = "あ", page = 1) {
       totalPages,
     };
   } catch (error) {
-    console.error("SeriesSearch error:", initial, error);
+    logFanzaSearchFailure({
+      api: "SeriesSearch",
+      error,
+      initial,
+      offset,
+      status: null,
+    });
     return {
       series: [],
       totalCount: 0,
@@ -1783,7 +1773,12 @@ export async function getMakers(initial = "あ", page = 1) {
     const { response: res, json } = await fetchJsonWithInFlight(url, { cache: "no-store" });
 
     if (!res.ok) {
-      console.error("MakerSearch failed:", initial, res.status, url);
+      logFanzaSearchFailure({
+        api: "MakerSearch",
+        initial,
+        offset,
+        status: res.status,
+      });
       return {
         makers: [],
         totalCount: 0,
@@ -1823,7 +1818,13 @@ export async function getMakers(initial = "あ", page = 1) {
       totalPages,
     };
   } catch (error) {
-    console.error("MakerSearch error:", error);
+    logFanzaSearchFailure({
+      api: "MakerSearch",
+      error,
+      initial,
+      offset,
+      status: null,
+    });
     return {
       makers: [],
       totalCount: 0,

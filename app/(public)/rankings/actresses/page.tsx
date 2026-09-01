@@ -6,6 +6,7 @@ import {
   getPopularActressRanking,
   type ActressRankingEntry,
 } from "@/lib/dmm";
+import { getSafeFanzaError } from "@/lib/fanza-safe-log";
 
 const SITE_URL = "https://avdizin.com";
 
@@ -31,7 +32,9 @@ export default async function PopularActressesRankingPage() {
   try {
     ranking = await getPopularActressRanking();
   } catch (error) {
-    console.error("Popular actress ranking error:", error);
+    console.error("Popular actress ranking error:", {
+      error: getSafeFanzaError(error),
+    });
     hasError = true;
   }
 
